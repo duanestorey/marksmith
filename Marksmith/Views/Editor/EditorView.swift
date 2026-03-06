@@ -105,6 +105,15 @@ struct EditorView: NSViewRepresentable {
             textView.isGrammarCheckingEnabled = grammarCheckEnabled
         }
 
+        // Sync spelling language
+        let currentLang = NSSpellChecker.shared.language()
+        if spellingLanguage.isEmpty {
+            NSSpellChecker.shared.automaticallyIdentifiesLanguages = true
+        } else if currentLang != spellingLanguage {
+            NSSpellChecker.shared.automaticallyIdentifiesLanguages = false
+            NSSpellChecker.shared.setLanguage(spellingLanguage)
+        }
+
         // Update syntax highlighter theme and re-highlight if needed
         // NOTE: Don't set textView.textColor or textView.font here — those modify
         // text storage attributes and wipe out syntax highlighting colors.

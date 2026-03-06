@@ -40,7 +40,10 @@ struct EditorView: NSViewRepresentable {
         textView.delegate = context.coordinator
 
         if !spellingLanguage.isEmpty {
+            NSSpellChecker.shared.automaticallyIdentifiesLanguages = false
             NSSpellChecker.shared.setLanguage(spellingLanguage)
+        } else {
+            NSSpellChecker.shared.automaticallyIdentifiesLanguages = true
         }
 
         // Set up gutter
@@ -207,7 +210,7 @@ struct EditorView: NSViewRepresentable {
             // Find the closing ---
             let searchStart = nsText.lineRange(for: NSRange(location: 0, length: 0)).length
             let searchRange = NSRange(location: searchStart, length: nsText.length - searchStart)
-            let closingRange = nsText.range(of: "---", options: [], range: searchRange)
+            let closingRange = nsText.range(of: "^---", options: .regularExpression, range: searchRange)
             guard closingRange.location != NSNotFound else {
                 return false
             }

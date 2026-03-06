@@ -88,6 +88,7 @@ struct ContentView: View {
                 }
             }
         }
+        .background(WindowFrameSaver())
         .toolbar {
             toolbarContent
         }
@@ -95,6 +96,9 @@ struct ContentView: View {
             gitStatus.configure(fileURL: fileURL)
             updatePreview()
             gitStatus.diffBuffer(document.text)
+            if let url = fileURL {
+                NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            }
         }
         .onChange(of: document.text) {
             updatePreview()
@@ -242,8 +246,6 @@ struct ContentView: View {
             }
             .help(isVerticalSplit ? "Switch to horizontal split" : "Switch to vertical split")
 
-            Divider()
-
             // Editor theme
             Menu {
                 ForEach(ThemeMode.allCases, id: \.self) { mode in
@@ -278,8 +280,6 @@ struct ContentView: View {
             }
             .help("Preview theme")
 
-            Divider()
-
             // SSG Build
             Button(action: { performSSGBuild() }) {
                 Image(systemName: "hammer")
@@ -293,8 +293,6 @@ struct ContentView: View {
             }
             .help(ssgService.status.isRunning ? "Stop server" : "Start server")
             .disabled(!hasSSGServe)
-
-            Divider()
 
             // Git commit
             Button(action: { showCommitSheet = true }) {
@@ -549,4 +547,20 @@ struct CommitSheetView: View {
             }
         }
     }
+}
+
+// MARK: - Window Frame Persistence
+
+struct WindowFrameSaver: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let window = view.window {
+                window.setFrameAutosaveName("MarksmithDocument")
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

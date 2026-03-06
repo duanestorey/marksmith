@@ -74,10 +74,11 @@ code {
 }
 
 pre {
-    padding: 16px;
-    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     font-size: 85%;
     line-height: 1.45;
+    padding: 16px;
+    overflow: auto;
     background-color: var(--code-bg);
     border-radius: 6px;
     border: 1px solid var(--code-border);

@@ -13,7 +13,7 @@ struct PreferencesView: View {
                     Label("SSG", systemImage: "server.rack")
                 }
         }
-        .frame(width: 480, height: 360)
+        .frame(width: 520, height: 420)
     }
 }
 
@@ -30,8 +30,6 @@ struct GeneralPreferencesView: View {
         Form {
             Section("Editor") {
                 HStack {
-                    Text("Font Size")
-                    Spacer()
                     Slider(value: $fontSize, in: 10...28, step: 1) {
                         Text("Font Size")
                     }
@@ -87,22 +85,66 @@ struct SSGPreferencesView: View {
     var body: some View {
         Form {
             Section("Build") {
-                TextField("Build Command", text: $buildCommand, prompt: Text("e.g., hugo build"))
-                Text("Command to build the static site")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Build Command")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextEditor(text: $buildCommand)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 48)
+                        .border(Color.secondary.opacity(0.3))
+                        .overlay(
+                            Group {
+                                if buildCommand.isEmpty {
+                                    Text("e.g., hugo build")
+                                        .foregroundColor(.secondary.opacity(0.5))
+                                        .font(.system(.body, design: .monospaced))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 4)
+                                        .allowsHitTesting(false)
+                                }
+                            },
+                            alignment: .topLeading
+                        )
+                }
             }
 
             Section("Serve") {
-                TextField("Serve Command", text: $serveCommand, prompt: Text("e.g., hugo server -D"))
-                Text("Command to start the dev server. The URL will be auto-detected from output.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Serve Command")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextEditor(text: $serveCommand)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 48)
+                        .border(Color.secondary.opacity(0.3))
+                        .overlay(
+                            Group {
+                                if serveCommand.isEmpty {
+                                    Text("e.g., hugo server -D")
+                                        .foregroundColor(.secondary.opacity(0.5))
+                                        .font(.system(.body, design: .monospaced))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 4)
+                                        .allowsHitTesting(false)
+                                }
+                            },
+                            alignment: .topLeading
+                        )
+                    Text("The URL will be auto-detected from output.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
 
-                TextField("Override URL", text: $serveURL, prompt: Text("e.g., http://localhost:1313"))
-                Text("Optional. Override the auto-detected serve URL.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Override URL")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextField("", text: $serveURL, prompt: Text("e.g., http://localhost:1313"))
+                    Text("Optional. Override the auto-detected serve URL.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Section {

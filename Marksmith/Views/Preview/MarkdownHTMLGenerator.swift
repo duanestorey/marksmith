@@ -121,18 +121,11 @@ struct MarkdownHTMLGenerator {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             \(cssLinks)
-            <link rel="stylesheet" href="prism.css">
         </head>
         <body>
             <article class="markdown-body">
                 \(body)
             </article>
-            <script src="prism.js"></script>
-            <script>
-                if (typeof Prism !== 'undefined') {
-                    Prism.highlightAll();
-                }
-            </script>
         </body>
         </html>
         """

@@ -15,7 +15,22 @@ final class MarkdownDocument: ReferenceFileDocument {
     static var readableContentTypes: [UTType] { [.markdownText] }
     static var writableContentTypes: [UTType] { [.markdownText] }
 
-    init(text: String = "") {
+    static let starterContent = """
+# Welcome to Marksmith
+
+Start writing your **Markdown** here. The preview will update as you type.
+
+## Features
+
+- Live preview with syntax highlighting
+- Light and dark themes
+- Git integration
+- Keyboard shortcuts for formatting
+
+> Tip: Use **Cmd+B** for bold, **Cmd+I** for italic, and **Cmd+Shift+K** for inline code.
+"""
+
+    init(text: String = starterContent) {
         self.text = text
     }
 

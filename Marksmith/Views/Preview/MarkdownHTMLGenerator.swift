@@ -5,42 +5,130 @@ import Markdown
 /// Generates clean HTML with data-line attributes for scroll synchronization.
 struct MarkdownHTMLGenerator {
     /// Parse Markdown text and produce an HTML string.
+    /// Strips YAML front matter (if present) and renders it as a styled table.
     func generateHTML(from markdown: String) -> String {
-        let document = Document(parsing: markdown, options: [.parseBlockDirectives, .parseSymbolLinks])
+        let (frontMatter, body) = extractFrontMatter(from: markdown)
+        let document = Document(parsing: body, options: [.parseBlockDirectives, .parseSymbolLinks])
         var walker = HTMLRenderer()
         walker.visit(document)
-        return walker.html
+
+        var html = ""
+        if let fm = frontMatter {
+            html += renderFrontMatter(fm)
+        }
+        html += walker.html
+        return html
+    }
+
+    /// Extract YAML front matter delimited by `---` at the start of the file.
+    private func extractFrontMatter(from text: String) -> (frontMatter: String?, body: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("---") else { return (nil, text) }
+
+        // Find the closing ---
+        let lines = text.components(separatedBy: "\n")
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return (nil, text) }
+
+        var closingIndex: Int?
+        for i in 1..<lines.count {
+            if lines[i].trimmingCharacters(in: .whitespaces) == "---" {
+                closingIndex = i
+                break
+            }
+        }
+
+        guard let endIndex = closingIndex, endIndex > 1 else { return (nil, text) }
+
+        let fmLines = lines[1..<endIndex]
+        let bodyLines = lines[(endIndex + 1)...]
+        return (fmLines.joined(separator: "\n"), bodyLines.joined(separator: "\n"))
+    }
+
+    /// Render front matter as a styled HTML table.
+    private func renderFrontMatter(_ yaml: String) -> String {
+        var rows = ""
+        let lines = yaml.components(separatedBy: "\n")
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            if let colonIdx = trimmed.firstIndex(of: ":") {
+                let key = String(trimmed[trimmed.startIndex..<colonIdx]).trimmingCharacters(in: .whitespaces)
+                let value = String(trimmed[trimmed.index(after: colonIdx)...]).trimmingCharacters(in: .whitespaces)
+                let displayValue = formatFrontMatterValue(value)
+                rows += "<tr><td class=\"fm-key\">\(escapeHTML(key))</td><td class=\"fm-value\">\(displayValue)</td></tr>\n"
+            } else if trimmed.hasPrefix("- ") {
+                // List item continuation
+                let value = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                rows += "<tr><td class=\"fm-key\"></td><td class=\"fm-value fm-list-item\">\(escapeHTML(value))</td></tr>\n"
+            }
+        }
+
+        return """
+        <details class="front-matter" open>
+            <summary>Front Matter</summary>
+            <table class="fm-table">\(rows)</table>
+        </details>
+        """
+    }
+
+    private func formatFrontMatterValue(_ value: String) -> String {
+        // Handle quoted strings
+        var v = value
+        if (v.hasPrefix("\"") && v.hasSuffix("\"")) || (v.hasPrefix("'") && v.hasSuffix("'")) {
+            v = String(v.dropFirst().dropLast())
+        }
+        // Boolean values
+        if v == "true" || v == "false" {
+            return "<span class=\"fm-bool\">\(v)</span>"
+        }
+        // Empty (likely a list follows)
+        if v.isEmpty {
+            return ""
+        }
+        return escapeHTML(v)
+    }
+
+    private func escapeHTML(_ string: String) -> String {
+        string
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     /// Wraps generated HTML body in the full template with CSS and JS references.
     func generateFullPage(from markdown: String, theme: PreviewTheme) -> String {
         let body = generateHTML(from: markdown)
-        let themeClass = theme == .dark ? "dark" : theme == .light ? "light" : "auto"
+
+        let cssLinks: String
+        switch theme {
+        case .light:
+            cssLinks = "<link rel=\"stylesheet\" href=\"preview-light.css\">"
+        case .dark:
+            cssLinks = "<link rel=\"stylesheet\" href=\"preview-dark.css\">"
+        case .system:
+            cssLinks = """
+            <link rel="stylesheet" href="preview-light.css" media="(prefers-color-scheme: light)">
+            <link rel="stylesheet" href="preview-dark.css" media="(prefers-color-scheme: dark)">
+            """
+        }
 
         return """
         <!DOCTYPE html>
-        <html class="\(themeClass)">
+        <html>
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <link rel="stylesheet" href="preview-light.css" media="(prefers-color-scheme: light)">
-            <link rel="stylesheet" href="preview-dark.css" media="(prefers-color-scheme: dark)">
-            <link rel="stylesheet" href="preview-light.css" class="theme-light">
-            <link rel="stylesheet" href="preview-dark.css" class="theme-dark">
-            <link rel="stylesheet" href="prism/prism.css">
-            <style>
-                html.light .theme-dark { display: none; }
-                html.dark .theme-light { display: none; }
-                html.auto .theme-light, html.auto .theme-dark { display: initial; }
-            </style>
+            \(cssLinks)
+            <link rel="stylesheet" href="prism.css">
         </head>
         <body>
             <article class="markdown-body">
                 \(body)
             </article>
-            <script src="prism/prism.js"></script>
+            <script src="prism.js"></script>
             <script>
-                // Re-highlight when content updates
                 if (typeof Prism !== 'undefined') {
                     Prism.highlightAll();
                 }

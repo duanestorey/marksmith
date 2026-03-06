@@ -17,7 +17,7 @@ final class MarkdownTextView: NSTextView {
     }
 
     private func commonInit() {
-        wantsLayer = true
+        drawsBackground = true
         allowsUndo = true
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
@@ -26,6 +26,7 @@ final class MarkdownTextView: NSTextView {
         isRichText = false
         usesFindBar = true
         isIncrementalSearchingEnabled = true
+        importsGraphics = false
 
         font = .monospacedSystemFont(ofSize: 14, weight: .regular)
         textContainerInset = NSSize(width: 4, height: 8)

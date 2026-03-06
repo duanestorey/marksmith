@@ -29,8 +29,25 @@ final class SSGService: ObservableObject {
         options: .caseInsensitive
     )
 
+    // ANSI escape sequence pattern
+    private static let ansiPattern = try! NSRegularExpression(
+        pattern: #"\x1B\[[0-9;]*[A-Za-z]"#
+    )
+
+    static func stripANSI(_ text: String) -> String {
+        ansiPattern.stringByReplacingMatches(
+            in: text, range: NSRange(location: 0, length: text.utf16.count),
+            withTemplate: ""
+        )
+    }
+
     deinit {
-        stop()
+        // Terminate process directly without dispatching (self is being deallocated)
+        if let process = process, process.isRunning {
+            process.terminate()
+        }
+        process = nil
+        outputPipe = nil
     }
 
     func serve(command: String, workingDirectory: String, configuredURL: String? = nil) {
@@ -53,8 +70,8 @@ final class SSGService: ObservableObject {
         process = nil
         outputPipe = nil
 
-        DispatchQueue.main.async {
-            self.status = .stopped
+        DispatchQueue.main.async { [weak self] in
+            self?.status = .stopped
         }
     }
 
@@ -76,8 +93,8 @@ final class SSGService: ObservableObject {
 
                 let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
                 let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                let outputString = String(data: outputData, encoding: .utf8) ?? ""
-                let errorString = String(data: errorData, encoding: .utf8) ?? ""
+                let outputString = Self.stripANSI(String(data: outputData, encoding: .utf8) ?? "")
+                let errorString = Self.stripANSI(String(data: errorData, encoding: .utf8) ?? "")
 
                 if process.terminationStatus == 0 {
                     completion(.success(outputString + errorString))
@@ -106,11 +123,14 @@ final class SSGService: ObservableObject {
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            let str = String(data: data, encoding: .utf8) ?? ""
+            let raw = String(data: data, encoding: .utf8) ?? ""
+            let str = Self.stripANSI(raw)
 
             DispatchQueue.main.async {
                 self?.output += str
-                self?.detectURL(in: str, configuredURL: configuredURL)
+                if let accumulated = self?.output {
+                    self?.detectURL(in: accumulated, configuredURL: configuredURL)
+                }
             }
         }
 

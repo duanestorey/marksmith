@@ -5,13 +5,13 @@ import Foundation
 /// Uses pattern matching for reliable highlighting without external tree-sitter dependencies.
 /// Designed for incremental updates — only re-highlights visible/changed regions.
 final class SyntaxHighlighter {
-    weak var textView: MarkdownTextView?
+    weak var textView: NSTextView?
     var theme: EditorTheme
 
     private var debounceTimer: Timer?
     private static let debounceInterval: TimeInterval = 0.05
 
-    init(textView: MarkdownTextView, theme: EditorTheme) {
+    init(textView: NSTextView, theme: EditorTheme) {
         self.textView = textView
         self.theme = theme
     }

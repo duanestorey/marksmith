@@ -25,8 +25,11 @@ targets:
       - path: Marksmith
         excludes:
           - Resources/**
-    resources:
       - path: Marksmith/Resources
+        excludes:
+          - Assets.xcassets
+        buildPhase: resources
+      - path: Marksmith/Resources/Assets.xcassets
         buildPhase: resources
     settings:
       base:

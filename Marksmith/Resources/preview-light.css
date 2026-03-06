@@ -174,6 +174,66 @@ strong { font-weight: 600; }
 em { font-style: italic; }
 del { text-decoration: line-through; color: var(--fg-secondary); }
 
+/* Front Matter */
+.front-matter {
+    margin-bottom: 24px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.front-matter summary {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-secondary);
+    padding: 8px 12px;
+    background-color: var(--table-header-bg);
+    cursor: pointer;
+    user-select: none;
+}
+
+.fm-table {
+    width: 100%;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+}
+
+.fm-table tr:last-child td {
+    border-bottom: none;
+}
+
+.fm-table td {
+    border-left: none;
+    border-right: none;
+    padding: 4px 12px;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    vertical-align: top;
+}
+
+.fm-key {
+    color: var(--link);
+    white-space: nowrap;
+    width: 1%;
+    font-weight: 500;
+}
+
+.fm-value {
+    color: var(--fg);
+}
+
+.fm-list-item::before {
+    content: "• ";
+    color: var(--fg-secondary);
+}
+
+.fm-bool {
+    color: #cf222e;
+}
+
 /* Selections */
 ::selection {
     background-color: var(--highlight-bg);

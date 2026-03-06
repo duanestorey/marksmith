@@ -18,6 +18,13 @@
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright 2026 Duane Storey. All rights reserved.
+https://github.com/duanestorey/marksmith</string>
+	<key>CFBundleIconFile</key>
+	<string></string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

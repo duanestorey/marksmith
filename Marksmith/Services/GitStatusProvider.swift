@@ -1,20 +1,29 @@
 import Foundation
 
 /// Provides git status information for the current file.
-/// Uses the git CLI for reliable operation without external library dependencies.
+/// Uses in-memory diffing (CollectionDifference) to compare buffer vs HEAD content.
 final class GitStatusProvider: ObservableObject {
     @Published var lineStatuses: [Int: GitLineStatus] = [:]
     @Published var isGitRepo: Bool = false
+    @Published var repoRoot: URL?
 
-    private var repoRoot: URL?
     private var fileURL: URL?
+    private var headContent: String?
+    private var relativePath: String?
+    /// Background-queue-safe copy of repoRoot (set before the @Published one)
+    private var backgroundRepoRoot: URL?
     private let queue = DispatchQueue(label: "com.marksmith.git-status", qos: .utility)
+    private var diffWorkItem: DispatchWorkItem?
 
     func configure(fileURL: URL?) {
         self.fileURL = fileURL
         guard let fileURL = fileURL else {
-            isGitRepo = false
-            lineStatuses = [:]
+            self.backgroundRepoRoot = nil
+            DispatchQueue.main.async {
+                self.isGitRepo = false
+                self.repoRoot = nil
+                self.lineStatuses = [:]
+            }
             return
         }
         queue.async { [weak self] in
@@ -22,11 +31,22 @@ final class GitStatusProvider: ObservableObject {
         }
     }
 
-    func refresh() {
+    /// Re-fetch HEAD content (e.g. on window focus after external commit)
+    func refetchHEAD() {
         guard let fileURL = fileURL else { return }
         queue.async { [weak self] in
-            self?.computeDiff(for: fileURL)
+            self?.fetchHEADContent(for: fileURL)
         }
+    }
+
+    /// Diff the current buffer text against HEAD content, debounced at 300ms.
+    func diffBuffer(_ text: String) {
+        diffWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.computeInMemoryDiff(currentText: text)
+        }
+        diffWorkItem = workItem
+        queue.asyncAfter(deadline: .now() + 0.3, execute: workItem)
     }
 
     // MARK: - Git CLI Operations
@@ -36,84 +56,125 @@ final class GitStatusProvider: ObservableObject {
         guard let result = runGit(["rev-parse", "--show-toplevel"], in: dir),
               !result.isEmpty
         else {
+            self.backgroundRepoRoot = nil
             DispatchQueue.main.async { [weak self] in
                 self?.isGitRepo = false
+                self?.repoRoot = nil
                 self?.lineStatuses = [:]
             }
             return
         }
         let root = URL(fileURLWithPath: result.trimmingCharacters(in: .whitespacesAndNewlines))
-        self.repoRoot = root
+        self.backgroundRepoRoot = root
+        self.relativePath = fileURL.path.replacingOccurrences(of: root.path + "/", with: "")
         DispatchQueue.main.async { [weak self] in
             self?.isGitRepo = true
+            self?.repoRoot = root
         }
-        computeDiff(for: fileURL)
+        fetchHEADContent(for: fileURL)
     }
 
-    private func computeDiff(for fileURL: URL) {
-        guard let repoRoot = repoRoot else { return }
-        let relativePath = fileURL.path.replacingOccurrences(of: repoRoot.path + "/", with: "")
+    private func fetchHEADContent(for fileURL: URL) {
+        guard let root = backgroundRepoRoot,
+              let relativePath = relativePath else { return }
 
-        // Get unified diff between HEAD and working tree
-        guard let diffOutput = runGit(
-            ["diff", "--unified=0", "HEAD", "--", relativePath],
-            in: repoRoot.path
-        ) else {
+        // Get the file content at HEAD
+        if let content = runGit(["show", "HEAD:\(relativePath)"], in: root.path) {
+            self.headContent = content
+        } else {
+            // File not in HEAD (new file) — all lines are added
+            self.headContent = nil
+        }
+    }
+
+    private func computeInMemoryDiff(currentText: String) {
+        guard backgroundRepoRoot != nil else {
             DispatchQueue.main.async { [weak self] in
                 self?.lineStatuses = [:]
             }
             return
         }
 
-        let statuses = parseDiff(diffOutput)
-        DispatchQueue.main.async { [weak self] in
-            self?.lineStatuses = statuses
+        // If no HEAD content, all lines are added (new file)
+        guard let headContent = headContent else {
+            let lines = currentText.components(separatedBy: "\n")
+            var statuses: [Int: GitLineStatus] = [:]
+            for i in 1...max(lines.count, 1) {
+                statuses[i] = .added
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.lineStatuses = statuses
+            }
+            return
         }
-    }
 
-    /// Parse unified diff output to extract line-level change information.
-    private func parseDiff(_ diff: String) -> [Int: GitLineStatus] {
-        var statuses: [Int: GitLineStatus] = [:]
-        let lines = diff.components(separatedBy: "\n")
+        let oldLines = headContent.components(separatedBy: "\n")
+        let newLines = currentText.components(separatedBy: "\n")
 
-        for line in lines {
-            // Parse hunk headers: @@ -oldStart,oldCount +newStart,newCount @@
-            guard line.hasPrefix("@@") else { continue }
+        let diff = newLines.difference(from: oldLines)
 
-            let parts = line.components(separatedBy: " ")
-            guard parts.count >= 3 else { continue }
+        // Build sets of inserted and removed indices
+        var insertedIndices = Set<Int>()
+        var removedIndices = Set<Int>()
 
-            let oldPart = parts[1] // e.g., "-10,3"
-            let newPart = parts[2] // e.g., "+12,5"
-
-            let oldInfo = parseRange(oldPart)
-            let newInfo = parseRange(newPart)
-
-            if newInfo.count == 0 && oldInfo.count > 0 {
-                // Lines were deleted — show indicator at the new position
-                statuses[newInfo.start] = .deleted
-            } else if oldInfo.count == 0 && newInfo.count > 0 {
-                // Lines were added
-                for i in newInfo.start..<(newInfo.start + newInfo.count) {
-                    statuses[i] = .added
-                }
-            } else {
-                // Lines were modified
-                for i in newInfo.start..<(newInfo.start + newInfo.count) {
-                    statuses[i] = .modified
-                }
+        for change in diff {
+            switch change {
+            case .insert(let offset, _, _):
+                insertedIndices.insert(offset)
+            case .remove(let offset, _, _):
+                removedIndices.insert(offset)
             }
         }
 
-        return statuses
-    }
+        var statuses: [Int: GitLineStatus] = [:]
 
-    private func parseRange(_ range: String) -> (start: Int, count: Int) {
-        let cleaned = range.trimmingCharacters(in: CharacterSet(charactersIn: "+-"))
-        let parts = cleaned.components(separatedBy: ",")
-        let start = Int(parts[0]) ?? 0
-        let count = parts.count > 1 ? (Int(parts[1]) ?? 1) : 1
-        return (start, count)
+        // Walk through new lines and classify changes
+        // Lines that are inserted with a corresponding removal nearby are "modified"
+        // Lines that are only inserted are "added"
+        // For removed lines, mark the position in the new file
+
+        // Use a simple heuristic: pair removals with insertions
+        var pairedInserts = Set<Int>()
+        var pairedRemoves = Set<Int>()
+
+        // Sort to pair in order
+        let sortedRemoves = removedIndices.sorted()
+        let sortedInserts = insertedIndices.sorted()
+
+        // Pair removals with nearby insertions (modified lines)
+        var insertIdx = 0
+        for removeIdx in sortedRemoves {
+            while insertIdx < sortedInserts.count && sortedInserts[insertIdx] < removeIdx {
+                insertIdx += 1
+            }
+            if insertIdx < sortedInserts.count {
+                pairedInserts.insert(sortedInserts[insertIdx])
+                pairedRemoves.insert(removeIdx)
+                insertIdx += 1
+            }
+        }
+
+        for idx in sortedInserts {
+            let lineNumber = idx + 1 // 1-based
+            if pairedInserts.contains(idx) {
+                statuses[lineNumber] = .modified
+            } else {
+                statuses[lineNumber] = .added
+            }
+        }
+
+        // Remaining unpaired removes: mark deletion at their position in new file
+        for removeIdx in sortedRemoves where !pairedRemoves.contains(removeIdx) {
+            // Find the corresponding position in the new file
+            let lineNumber = min(removeIdx + 1, max(newLines.count, 1))
+            if statuses[lineNumber] == nil {
+                statuses[lineNumber] = .deleted
+            }
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.lineStatuses = statuses
+        }
     }
 
     private func runGit(_ arguments: [String], in directory: String) -> String? {
@@ -143,29 +204,99 @@ final class GitStatusProvider: ObservableObject {
 
 // MARK: - Git Service for commit/push operations
 
+struct GitFileStatus: Identifiable {
+    let id = UUID()
+    let statusCode: String
+    let filePath: String
+
+    var displayStatus: String {
+        switch statusCode {
+        case "M": return "Modified"
+        case "A": return "Added"
+        case "D": return "Deleted"
+        case "??": return "Untracked"
+        case "R": return "Renamed"
+        default: return statusCode
+        }
+    }
+
+    var statusColor: String {
+        switch statusCode {
+        case "M": return "blue"
+        case "A": return "green"
+        case "D": return "red"
+        case "??": return "gray"
+        default: return "secondary"
+        }
+    }
+}
+
 final class GitService {
     static let shared = GitService()
+
+    func status(repoRoot: String, completion: @escaping ([GitFileStatus]) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Use -uall to list individual untracked files (not just directories)
+            let output = self.runGitWithOutput(["status", "--porcelain", "-uall"], in: repoRoot) ?? ""
+            let files = output.components(separatedBy: "\n")
+                .filter { !$0.isEmpty }
+                .compactMap { line -> GitFileStatus? in
+                    // Porcelain v1 format: XY<space>PATH (exactly 2 status chars + space + path)
+                    guard line.count >= 4 else { return nil }
+                    let xy = String(line.prefix(2))
+                    let path = String(line.dropFirst(3))
+
+                    // Determine display code from XY pair
+                    let code: String
+                    if xy == "??" {
+                        code = "??"
+                    } else if xy.hasPrefix("A") {
+                        code = "A"
+                    } else if xy.hasPrefix("D") || xy.hasSuffix("D") {
+                        code = "D"
+                    } else if xy.hasPrefix("R") {
+                        code = "R"
+                    } else if xy.hasPrefix("M") || xy.hasSuffix("M") {
+                        code = "M"
+                    } else {
+                        code = xy.trimmingCharacters(in: .whitespaces)
+                    }
+
+                    return GitFileStatus(statusCode: code, filePath: path)
+                }
+            DispatchQueue.main.async {
+                completion(files)
+            }
+        }
+    }
 
     func commit(
         message: String,
         stageAll: Bool,
         push: Bool,
+        repoRoot: String? = nil,
         completion: @escaping (Result<Void, Error>) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                guard let repoRoot = self.findRepoRoot() else {
-                    throw GitError.notARepository
+                let root: String
+                if let repoRoot = repoRoot {
+                    root = repoRoot
+                } else {
+                    guard let found = self.findRepoRoot() else {
+                        throw GitError.notARepository
+                    }
+                    root = found
                 }
 
                 if stageAll {
-                    try self.runGitOrThrow(["add", "-A"], in: repoRoot)
+                    try self.runGitOrThrow(["add", "-A"], in: root)
                 }
 
-                try self.runGitOrThrow(["commit", "-m", message], in: repoRoot)
+                try self.runGitOrThrow(["commit", "-m", message], in: root)
 
                 if push {
-                    try self.runGitOrThrow(["push"], in: repoRoot)
+                    try self.runGitOrThrow(["push"], in: root)
                 }
 
                 completion(.success(()))
@@ -176,7 +307,6 @@ final class GitService {
     }
 
     func findRepoRoot() -> String? {
-        // Use the frontmost document's location or current directory
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["rev-parse", "--show-toplevel"]
@@ -191,6 +321,28 @@ final class GitService {
             guard process.terminationStatus == 0 else { return nil }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
+    }
+
+    private func runGitWithOutput(_ arguments: [String], in directory: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        process.environment = ProcessInfo.processInfo.environment
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)
         } catch {
             return nil
         }

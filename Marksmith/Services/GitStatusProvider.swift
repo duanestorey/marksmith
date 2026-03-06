@@ -66,7 +66,8 @@ final class GitStatusProvider: ObservableObject {
         }
         let root = URL(fileURLWithPath: result.trimmingCharacters(in: .whitespacesAndNewlines))
         self.backgroundRepoRoot = root
-        self.relativePath = fileURL.path.replacingOccurrences(of: root.path + "/", with: "")
+        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        self.relativePath = fileURL.path.replacingOccurrences(of: rootPath, with: "")
         DispatchQueue.main.async { [weak self] in
             self?.isGitRepo = true
             self?.repoRoot = root
@@ -97,10 +98,12 @@ final class GitStatusProvider: ObservableObject {
 
         // If no HEAD content, all lines are added (new file)
         guard let headContent = headContent else {
-            let lines = currentText.components(separatedBy: "\n")
             var statuses: [Int: GitLineStatus] = [:]
-            for i in 1...max(lines.count, 1) {
-                statuses[i] = .added
+            if !currentText.isEmpty {
+                let lines = currentText.components(separatedBy: "\n")
+                for i in 1...lines.count {
+                    statuses[i] = .added
+                }
             }
             DispatchQueue.main.async { [weak self] in
                 self?.lineStatuses = statuses

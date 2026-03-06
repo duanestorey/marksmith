@@ -122,6 +122,10 @@ struct EditorView: NSViewRepresentable {
             self.parent = parent
         }
 
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
         // MARK: - NSTextViewDelegate
 
         func textDidChange(_ notification: Notification) {
@@ -199,7 +203,7 @@ struct EditorView: NSViewRepresentable {
             if textView.shouldChangeText(in: range, replacementString: replacement) {
                 textView.textStorage?.replaceCharacters(in: range, with: replacement)
                 textView.didChangeText()
-                let newCursorPos = range.location + prefix.count + selected.count
+                let newCursorPos = range.location + prefix.utf16.count + selected.utf16.count
                 textView.setSelectedRange(NSRange(location: newCursorPos, length: 0))
             }
         }
@@ -367,4 +371,55 @@ final class GutterRulerView: NSRulerView {
             path.fill()
         }
     }
+}
+
+// MARK: - Editor Theme
+
+struct EditorTheme {
+    let backgroundColor: NSColor
+    let textColor: NSColor
+    let cursorColor: NSColor
+    let selectionColor: NSColor
+    let fontSize: CGFloat
+
+    let headingColor: NSColor
+    let boldColor: NSColor
+    let italicColor: NSColor
+    let codeColor: NSColor
+    let linkColor: NSColor
+    let linkURLColor: NSColor
+    let blockQuoteColor: NSColor
+    let listMarkerColor: NSColor
+
+    static let light = EditorTheme(
+        backgroundColor: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0),
+        textColor: NSColor(red: 0.15, green: 0.16, blue: 0.18, alpha: 1.0),
+        cursorColor: NSColor(red: 0.20, green: 0.25, blue: 0.80, alpha: 1.0),
+        selectionColor: NSColor(red: 0.80, green: 0.85, blue: 0.95, alpha: 1.0),
+        fontSize: 14,
+        headingColor: NSColor(red: 0.10, green: 0.10, blue: 0.60, alpha: 1.0),
+        boldColor: NSColor(red: 0.15, green: 0.16, blue: 0.18, alpha: 1.0),
+        italicColor: NSColor(red: 0.40, green: 0.20, blue: 0.50, alpha: 1.0),
+        codeColor: NSColor(red: 0.75, green: 0.15, blue: 0.15, alpha: 1.0),
+        linkColor: NSColor(red: 0.10, green: 0.40, blue: 0.70, alpha: 1.0),
+        linkURLColor: NSColor(red: 0.50, green: 0.50, blue: 0.55, alpha: 1.0),
+        blockQuoteColor: NSColor(red: 0.40, green: 0.45, blue: 0.50, alpha: 1.0),
+        listMarkerColor: NSColor(red: 0.30, green: 0.50, blue: 0.30, alpha: 1.0)
+    )
+
+    static let dark = EditorTheme(
+        backgroundColor: NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0),
+        textColor: NSColor(red: 0.85, green: 0.85, blue: 0.87, alpha: 1.0),
+        cursorColor: NSColor(red: 0.55, green: 0.65, blue: 1.0, alpha: 1.0),
+        selectionColor: NSColor(red: 0.20, green: 0.25, blue: 0.40, alpha: 1.0),
+        fontSize: 14,
+        headingColor: NSColor(red: 0.55, green: 0.65, blue: 1.0, alpha: 1.0),
+        boldColor: NSColor(red: 0.90, green: 0.90, blue: 0.92, alpha: 1.0),
+        italicColor: NSColor(red: 0.75, green: 0.55, blue: 0.85, alpha: 1.0),
+        codeColor: NSColor(red: 0.95, green: 0.55, blue: 0.45, alpha: 1.0),
+        linkColor: NSColor(red: 0.45, green: 0.70, blue: 1.0, alpha: 1.0),
+        linkURLColor: NSColor(red: 0.50, green: 0.55, blue: 0.60, alpha: 1.0),
+        blockQuoteColor: NSColor(red: 0.55, green: 0.60, blue: 0.65, alpha: 1.0),
+        listMarkerColor: NSColor(red: 0.45, green: 0.70, blue: 0.45, alpha: 1.0)
+    )
 }

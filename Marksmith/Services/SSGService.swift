@@ -52,11 +52,8 @@ final class SSGService: ObservableObject {
 
     func serve(command: String, workingDirectory: String, configuredURL: String? = nil) {
         stop()
-
-        DispatchQueue.main.async {
-            self.status = .starting
-            self.output = ""
-        }
+        status = .starting
+        output = ""
 
         queue.async { [weak self] in
             self?.launchProcess(command: command, workingDirectory: workingDirectory, configuredURL: configuredURL)
@@ -69,10 +66,7 @@ final class SSGService: ObservableObject {
         }
         process = nil
         outputPipe = nil
-
-        DispatchQueue.main.async { [weak self] in
-            self?.status = .stopped
-        }
+        status = .stopped
     }
 
     func build(command: String, workingDirectory: String, completion: @escaping (Result<String, Error>) -> Void) {
@@ -116,8 +110,6 @@ final class SSGService: ObservableObject {
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
-        self.outputPipe = pipe
-        self.process = proc
 
         // Read output asynchronously for URL detection
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -146,6 +138,11 @@ final class SSGService: ObservableObject {
 
         do {
             try proc.run()
+            // Store references on main thread to avoid data race with stop()
+            DispatchQueue.main.async { [weak self] in
+                self?.process = proc
+                self?.outputPipe = pipe
+            }
         } catch {
             DispatchQueue.main.async { [weak self] in
                 self?.status = .error(error.localizedDescription)

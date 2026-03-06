@@ -27,12 +27,7 @@ struct PreviewView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        // Update theme class without full reload
-        let themeClass = theme == .dark ? "dark" : theme == .light ? "light" : "auto"
-        let setThemeJS = "document.documentElement.className = '\(themeClass)';"
-
-        // Update content with debounce
-        context.coordinator.scheduleUpdate(html: html, themeJS: setThemeJS, webView: webView)
+        context.coordinator.scheduleUpdate(html: html, webView: webView)
     }
 
     final class Coordinator {
@@ -41,11 +36,7 @@ struct PreviewView: NSViewRepresentable {
         private var lastHTML: String = ""
         private static let debounceInterval: TimeInterval = 0.3
 
-        func scheduleUpdate(html: String, themeJS: String, webView: WKWebView) {
-            // Apply theme immediately
-            webView.evaluateJavaScript(themeJS) { _, _ in }
-
-            // Debounce content updates
+        func scheduleUpdate(html: String, webView: WKWebView) {
             guard html != lastHTML else { return }
             lastHTML = html
 

@@ -11,59 +11,46 @@ struct EditorView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        scrollView.wantsLayer = true
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-
-        let textStorage = NSTextStorage()
-        let layoutManager = NSLayoutManager()
-        textStorage.addLayoutManager(layoutManager)
-
-        let containerSize = NSSize(
-            width: scrollView.contentSize.width,
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        let textContainer = NSTextContainer(size: containerSize)
-        textContainer.widthTracksTextView = true
-        textContainer.lineFragmentPadding = 4
-        layoutManager.addTextContainer(textContainer)
-
-        let textView = MarkdownTextView(frame: .zero, textContainer: textContainer)
-        textView.autoresizingMask = [.width]
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.minSize = NSSize(width: 0, height: scrollView.contentSize.height)
-        textView.textContainerInset = NSSize(width: 4, height: 8)
-        textView.applyTheme(theme)
-
-        textView.onTextChange = { [weak textView] newText in
-            guard let textView = textView else { return }
-            context.coordinator.textDidChange(newText, textView: textView)
+        let scrollView = NSTextView.scrollableTextView()
+        guard let textView = scrollView.documentView as? NSTextView else {
+            return scrollView
         }
 
+        // Configure text view
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
+        textView.importsGraphics = false
+        textView.drawsBackground = true
+        textView.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+        textView.textContainerInset = NSSize(width: 4, height: 8)
+        textView.textContainer?.lineFragmentPadding = 4
+
+        textView.delegate = context.coordinator
+
         // Set up gutter
-        let gutterView = GutterView(frame: NSRect(x: 0, y: 0, width: GutterView.gutterWidth, height: 0))
+        let gutterView = GutterView()
         gutterView.font = textView.font ?? .monospacedSystemFont(ofSize: 14, weight: .regular)
 
         let rulerView = GutterRulerView(scrollView: scrollView, orientation: .verticalRuler)
+        rulerView.clipsToBounds = true
         rulerView.gutterView = gutterView
-        rulerView.textView = textView
         rulerView.ruleThickness = GutterView.gutterWidth
         scrollView.verticalRulerView = rulerView
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
 
-        scrollView.documentView = textView
-
-        // Set initial text
-        textView.string = document.text
-
-        // Set up syntax highlighter
+        context.coordinator.textView = textView
+        context.coordinator.scrollView = scrollView
+        context.coordinator.rulerView = rulerView
         context.coordinator.setupSyntaxHighlighter(textView: textView, theme: theme)
+        context.coordinator.setupFormattingNotifications()
 
         // Observe scroll/layout changes to update gutter
         NotificationCenter.default.addObserver(
@@ -79,143 +66,305 @@ struct EditorView: NSViewRepresentable {
             object: scrollView.contentView
         )
 
-        context.coordinator.textView = textView
-        context.coordinator.scrollView = scrollView
-        context.coordinator.rulerView = rulerView
-
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
 
-        if textView.string != document.text {
+        // Sync text from document to editor
+        let textChanged = textView.string != document.text
+        if textChanged {
             let selectedRanges = textView.selectedRanges
             textView.string = document.text
             textView.selectedRanges = selectedRanges
-            context.coordinator.syntaxHighlighter?.invalidate()
         }
 
-        textView.applyTheme(theme)
+        // Apply theme properties that don't touch text storage
+        textView.backgroundColor = theme.backgroundColor
+        textView.insertionPointColor = theme.cursorColor
+        textView.selectedTextAttributes = [
+            .backgroundColor: theme.selectionColor
+        ]
+
+        // Update syntax highlighter theme and re-highlight if needed
+        // NOTE: Don't set textView.textColor or textView.font here — those modify
+        // text storage attributes and wipe out syntax highlighting colors.
+        // The SyntaxHighlighter.invalidate() sets base font + color via setAttributes.
+        let highlighter = context.coordinator.syntaxHighlighter
+        if highlighter?.theme.fontSize != theme.fontSize || textChanged {
+            highlighter?.theme = theme
+            highlighter?.invalidate()
+        }
+
+        // Update gutter
         context.coordinator.rulerView?.gutterView?.backgroundColor = theme.backgroundColor.blended(
             withFraction: 0.05, of: .gray) ?? theme.backgroundColor
         context.coordinator.rulerView?.gutterView?.textColor = theme.textColor.withAlphaComponent(0.5)
         context.coordinator.rulerView?.gutterView?.gitStatuses = gitStatuses
         context.coordinator.rulerView?.needsDisplay = true
-        context.coordinator.updateSyntaxHighlighterTheme(theme)
     }
 
-    final class Coordinator: NSObject {
+    // MARK: - Coordinator
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: EditorView
-        weak var textView: MarkdownTextView?
+        weak var textView: NSTextView?
         weak var scrollView: NSScrollView?
         weak var rulerView: GutterRulerView?
         var syntaxHighlighter: SyntaxHighlighter?
+        var lastThemeFontSize: CGFloat = 0
+        var lastThemeIsDark: Bool?
         private var isUpdating = false
 
         init(_ parent: EditorView) {
             self.parent = parent
         }
 
-        func textDidChange(_ newText: String, textView: MarkdownTextView) {
-            guard !isUpdating else { return }
+        // MARK: - NSTextViewDelegate
+
+        func textDidChange(_ notification: Notification) {
+            guard !isUpdating, let textView = textView else { return }
             isUpdating = true
-            parent.document.text = newText
+            parent.document.text = textView.string
             syntaxHighlighter?.textDidChange()
             updateLineRects()
             isUpdating = false
         }
 
+        // MARK: - Layout notifications
+
         @objc func textViewDidChangeLayout(_ notification: Notification) {
+            guard !isUpdating else { return }
+            isUpdating = true
             updateLineRects()
+            isUpdating = false
         }
 
+        // MARK: - Formatting commands
+
+        func setupFormattingNotifications() {
+            let nc = NotificationCenter.default
+            nc.addObserver(self, selector: #selector(handleFormatBold), name: .editorFormatBold, object: nil)
+            nc.addObserver(self, selector: #selector(handleFormatItalic), name: .editorFormatItalic, object: nil)
+            nc.addObserver(self, selector: #selector(handleFormatCode), name: .editorFormatCode, object: nil)
+            nc.addObserver(self, selector: #selector(handleFormatH1), name: .editorFormatH1, object: nil)
+            nc.addObserver(self, selector: #selector(handleFormatH2), name: .editorFormatH2, object: nil)
+            nc.addObserver(self, selector: #selector(handleFormatH3), name: .editorFormatH3, object: nil)
+            nc.addObserver(self, selector: #selector(handleFormatLink), name: .editorFormatLink, object: nil)
+            nc.addObserver(self, selector: #selector(handleFormatImage), name: .editorFormatImage, object: nil)
+        }
+
+        @objc private func handleFormatBold() { wrapSelection(prefix: "**", suffix: "**") }
+        @objc private func handleFormatItalic() { wrapSelection(prefix: "_", suffix: "_") }
+        @objc private func handleFormatCode() { wrapSelection(prefix: "`", suffix: "`") }
+        @objc private func handleFormatH1() { prefixLine(with: "# ") }
+        @objc private func handleFormatH2() { prefixLine(with: "## ") }
+        @objc private func handleFormatH3() { prefixLine(with: "### ") }
+
+        @objc private func handleFormatLink() {
+            guard let textView = textView else { return }
+            let selected = selectedText()
+            if selected.isEmpty {
+                textView.insertText("[link text](url)", replacementRange: textView.selectedRange())
+            } else {
+                wrapSelection(prefix: "[", suffix: "](url)")
+            }
+        }
+
+        @objc private func handleFormatImage() {
+            guard let textView = textView else { return }
+            let selected = selectedText()
+            if selected.isEmpty {
+                textView.insertText("![alt text](image-url)", replacementRange: textView.selectedRange())
+            } else {
+                wrapSelection(prefix: "![", suffix: "](image-url)")
+            }
+        }
+
+        private func selectedText() -> String {
+            guard let textView = textView, let storage = textView.textStorage else { return "" }
+            let range = textView.selectedRange()
+            guard range.length > 0 else { return "" }
+            return (storage.string as NSString).substring(with: range)
+        }
+
+        private func wrapSelection(prefix: String, suffix: String) {
+            guard let textView = textView else { return }
+            let range = textView.selectedRange()
+            let selected = selectedText()
+            let replacement = "\(prefix)\(selected)\(suffix)"
+
+            if textView.shouldChangeText(in: range, replacementString: replacement) {
+                textView.textStorage?.replaceCharacters(in: range, with: replacement)
+                textView.didChangeText()
+                let newCursorPos = range.location + prefix.count + selected.count
+                textView.setSelectedRange(NSRange(location: newCursorPos, length: 0))
+            }
+        }
+
+        private func prefixLine(with prefix: String) {
+            guard let textView = textView, let storage = textView.textStorage else { return }
+            let text = storage.string as NSString
+            let lineRange = text.lineRange(for: textView.selectedRange())
+            let lineText = text.substring(with: lineRange)
+
+            let stripped = lineText.replacingOccurrences(
+                of: "^#{1,6}\\s*", with: "", options: .regularExpression)
+            let replacement = prefix + stripped
+
+            if textView.shouldChangeText(in: lineRange, replacementString: replacement) {
+                storage.replaceCharacters(in: lineRange, with: replacement)
+                textView.didChangeText()
+            }
+        }
+
+        // MARK: - Line rects for gutter
+
         func updateLineRects() {
-            guard let textView = textView,
-                  let layoutManager = textView.layoutManager,
-                  let textContainer = textView.textContainer,
-                  let scrollView = scrollView
-            else { return }
-
-            let visibleRect = scrollView.contentView.bounds
-            let textContainerInset = textView.textContainerInset
-
-            let text = textView.string as NSString
-            var lineRects: [(lineNumber: Int, rect: NSRect)] = []
-            var lineNumber = 1
-            var glyphIndex = 0
-            let numberOfGlyphs = layoutManager.numberOfGlyphs
-
-            while glyphIndex < numberOfGlyphs {
-                var lineGlyphRange = NSRange()
-                let lineRect = layoutManager.lineFragmentRect(
-                    forGlyphAt: glyphIndex,
-                    effectiveRange: &lineGlyphRange
-                )
-
-                let adjustedRect = NSRect(
-                    x: lineRect.origin.x,
-                    y: lineRect.origin.y + textContainerInset.height,
-                    width: lineRect.width,
-                    height: lineRect.height
-                )
-
-                if adjustedRect.maxY >= visibleRect.minY && adjustedRect.minY <= visibleRect.maxY {
-                    lineRects.append((lineNumber, adjustedRect))
-                }
-
-                let charRange = layoutManager.characterRange(
-                    forGlyphRange: lineGlyphRange,
-                    actualGlyphRange: nil
-                )
-
-                // Count newlines within this line fragment to handle wrapped lines
-                var idx = charRange.location
-                let end = NSMaxRange(charRange)
-                while idx < end {
-                    if idx == text.length - 1 || text.character(at: idx) == 0x0A {
-                        lineNumber += 1
-                    }
-                    idx += 1
-                }
-
-                glyphIndex = NSMaxRange(lineGlyphRange)
-            }
-
-            // Handle empty document
-            if lineRects.isEmpty {
-                let rect = NSRect(x: 0, y: textContainerInset.height, width: 100, height: 18)
-                lineRects.append((1, rect))
-            }
-
-            rulerView?.gutterView?.lineRects = lineRects
             rulerView?.needsDisplay = true
         }
 
-        func setupSyntaxHighlighter(textView: MarkdownTextView, theme: EditorTheme) {
+        func setupSyntaxHighlighter(textView: NSTextView, theme: EditorTheme) {
             syntaxHighlighter = SyntaxHighlighter(textView: textView, theme: theme)
-            syntaxHighlighter?.invalidate()
-        }
-
-        func updateSyntaxHighlighterTheme(_ theme: EditorTheme) {
-            syntaxHighlighter?.theme = theme
-            syntaxHighlighter?.invalidate()
         }
     }
 }
 
-/// A ruler view that hosts the GutterView for line numbers and git indicators.
+/// A ruler view that computes and draws line numbers directly on each draw call.
 final class GutterRulerView: NSRulerView {
     var gutterView: GutterView?
-    weak var textView: MarkdownTextView?
 
     override var requiredThickness: CGFloat {
         GutterView.gutterWidth
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let gutterView = gutterView else { return }
-        gutterView.frame = bounds
-        gutterView.draw(dirtyRect)
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        guard let gutter = gutterView,
+              let scrollView = self.scrollView,
+              let textView = scrollView.documentView as? NSTextView,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer
+        else { return }
+
+        // Fill background
+        gutter.backgroundColor.setFill()
+        rect.fill()
+
+        let text = textView.string as NSString
+        guard text.length > 0 else { return }
+
+        let textContainerInset = textView.textContainerInset
+        let visibleRect = scrollView.contentView.bounds
+
+        // Get glyph range for the visible area
+        let containerRect = NSRect(
+            x: 0,
+            y: visibleRect.origin.y - textContainerInset.height,
+            width: textContainer.size.width,
+            height: visibleRect.height
+        )
+        let visibleGlyphRange = layoutManager.glyphRange(
+            forBoundingRect: containerRect,
+            in: textContainer
+        )
+        guard visibleGlyphRange.length > 0 else { return }
+
+        // Count newlines before visible range to get starting line number
+        let firstVisibleChar = layoutManager.characterRange(
+            forGlyphRange: NSRange(location: visibleGlyphRange.location, length: 1),
+            actualGlyphRange: nil
+        ).location
+        var lineNumber = 1
+        for i in 0..<min(firstVisibleChar, text.length) {
+            if text.character(at: i) == 0x0A {
+                lineNumber += 1
+            }
+        }
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: gutter.font.pointSize - 2, weight: .regular),
+            .foregroundColor: gutter.textColor
+        ]
+
+        var glyphIndex = visibleGlyphRange.location
+        let endGlyph = NSMaxRange(visibleGlyphRange)
+        var lastDrawnLineNumber = -1
+
+        while glyphIndex < endGlyph {
+            var lineGlyphRange = NSRange()
+            let lineRect = layoutManager.lineFragmentRect(
+                forGlyphAt: glyphIndex,
+                effectiveRange: &lineGlyphRange
+            )
+
+            // Map text view coordinate to ruler view coordinate
+            let textViewPoint = NSPoint(x: 0, y: lineRect.origin.y + textContainerInset.height)
+            let rulerPoint = convert(textViewPoint, from: textView)
+
+            // Only draw line number on the first visual line of each logical line
+            if lineNumber != lastDrawnLineNumber {
+                let numStr = "\(lineNumber)" as NSString
+                let size = numStr.size(withAttributes: attrs)
+                let x = GutterView.gutterWidth - size.width - 12
+                let drawY = rulerPoint.y + (lineRect.height - size.height) / 2
+                numStr.draw(at: NSPoint(x: x, y: drawY), withAttributes: attrs)
+
+                // Draw git indicator
+                let indicatorRect = NSRect(x: 0, y: rulerPoint.y, width: GutterView.gutterWidth, height: lineRect.height)
+                drawGitIndicator(status: gutter.gitStatuses[lineNumber] ?? .unchanged, in: indicatorRect)
+
+                lastDrawnLineNumber = lineNumber
+            }
+
+            // Advance line number if this fragment ends with a newline
+            let charRange = layoutManager.characterRange(
+                forGlyphRange: lineGlyphRange,
+                actualGlyphRange: nil
+            )
+            let lastChar = NSMaxRange(charRange) - 1
+            if lastChar >= 0 && lastChar < text.length && text.character(at: lastChar) == 0x0A {
+                lineNumber += 1
+            }
+
+            glyphIndex = NSMaxRange(lineGlyphRange)
+        }
+    }
+
+    private func drawGitIndicator(status: GitLineStatus, in rect: NSRect) {
+        guard status != .unchanged else { return }
+        let indicatorWidth: CGFloat = 3
+        let indicatorRect = NSRect(
+            x: GutterView.gutterWidth - indicatorWidth - 2,
+            y: rect.origin.y + 1,
+            width: indicatorWidth,
+            height: rect.height - 2
+        )
+
+        switch status {
+        case .unchanged:
+            break
+        case .added:
+            NSColor.systemGreen.setFill()
+            NSBezierPath(roundedRect: indicatorRect, xRadius: 1, yRadius: 1).fill()
+        case .modified:
+            NSColor.systemBlue.setFill()
+            NSBezierPath(roundedRect: indicatorRect, xRadius: 1, yRadius: 1).fill()
+        case .deleted:
+            let triangleRect = NSRect(
+                x: GutterView.gutterWidth - 8,
+                y: rect.origin.y,
+                width: 6,
+                height: 6
+            )
+            NSColor.systemRed.setFill()
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: triangleRect.minX, y: triangleRect.minY))
+            path.line(to: NSPoint(x: triangleRect.maxX, y: triangleRect.midY))
+            path.line(to: NSPoint(x: triangleRect.minX, y: triangleRect.maxY))
+            path.close()
+            path.fill()
+        }
     }
 }

@@ -15,32 +15,35 @@ struct MarkdownHTMLGenerator {
     /// Wraps generated HTML body in the full template with CSS and JS references.
     func generateFullPage(from markdown: String, theme: PreviewTheme) -> String {
         let body = generateHTML(from: markdown)
-        let themeClass = theme == .dark ? "dark" : theme == .light ? "light" : "auto"
+
+        let cssLinks: String
+        switch theme {
+        case .light:
+            cssLinks = "<link rel=\"stylesheet\" href=\"preview-light.css\">"
+        case .dark:
+            cssLinks = "<link rel=\"stylesheet\" href=\"preview-dark.css\">"
+        case .system:
+            cssLinks = """
+            <link rel="stylesheet" href="preview-light.css" media="(prefers-color-scheme: light)">
+            <link rel="stylesheet" href="preview-dark.css" media="(prefers-color-scheme: dark)">
+            """
+        }
 
         return """
         <!DOCTYPE html>
-        <html class="\(themeClass)">
+        <html>
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <link rel="stylesheet" href="preview-light.css" media="(prefers-color-scheme: light)">
-            <link rel="stylesheet" href="preview-dark.css" media="(prefers-color-scheme: dark)">
-            <link rel="stylesheet" href="preview-light.css" class="theme-light">
-            <link rel="stylesheet" href="preview-dark.css" class="theme-dark">
-            <link rel="stylesheet" href="prism/prism.css">
-            <style>
-                html.light .theme-dark { display: none; }
-                html.dark .theme-light { display: none; }
-                html.auto .theme-light, html.auto .theme-dark { display: initial; }
-            </style>
+            \(cssLinks)
+            <link rel="stylesheet" href="prism.css">
         </head>
         <body>
             <article class="markdown-body">
                 \(body)
             </article>
-            <script src="prism/prism.js"></script>
+            <script src="prism.js"></script>
             <script>
-                // Re-highlight when content updates
                 if (typeof Prism !== 'undefined') {
                     Prism.highlightAll();
                 }

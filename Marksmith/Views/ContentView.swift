@@ -72,7 +72,13 @@ struct ContentView: View {
         .onAppear {
             updatePreview()
         }
-        .onChange(of: document.text) { _ in
+        .onChange(of: document.text) {
+            updatePreview()
+        }
+        .onChange(of: previewThemeMode) {
+            updatePreview()
+        }
+        .onChange(of: systemColorScheme) {
             updatePreview()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSplitOrientation)) { _ in

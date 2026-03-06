@@ -25,7 +25,6 @@ targets:
       - path: Marksmith
         excludes:
           - Resources/**
-    resources:
       - path: Marksmith/Resources
         buildPhase: resources
     settings:

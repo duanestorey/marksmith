@@ -11,6 +11,9 @@ struct ContentView: View {
     @AppStorage("ssgBuildCommand") private var ssgBuildCommand = ""
     @AppStorage("ssgServeCommand") private var ssgServeCommand = ""
     @AppStorage("ssgServeURL") private var ssgServeURL = ""
+    @AppStorage("spellCheckEnabled") private var spellCheckEnabled = true
+    @AppStorage("grammarCheckEnabled") private var grammarCheckEnabled = false
+    @AppStorage("spellingLanguage") private var spellingLanguage: SpellingLanguage = .automatic
 
     @StateObject private var gitStatus = GitStatusProvider()
     @StateObject private var ssgService = SSGService()
@@ -147,7 +150,10 @@ struct ContentView: View {
         EditorView(
             document: document,
             theme: editorTheme,
-            gitStatuses: gitStatus.lineStatuses
+            gitStatuses: gitStatus.lineStatuses,
+            spellCheckEnabled: spellCheckEnabled,
+            grammarCheckEnabled: grammarCheckEnabled,
+            spellingLanguage: spellingLanguage.rawValue
         )
         .frame(minWidth: 200, minHeight: 100)
     }

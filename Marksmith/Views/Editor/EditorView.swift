@@ -5,6 +5,9 @@ struct EditorView: NSViewRepresentable {
     @ObservedObject var document: MarkdownDocument
     var theme: EditorTheme
     var gitStatuses: [Int: GitLineStatus]
+    var spellCheckEnabled: Bool
+    var grammarCheckEnabled: Bool
+    var spellingLanguage: String
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -24,6 +27,8 @@ struct EditorView: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = spellCheckEnabled
+        textView.isGrammarCheckingEnabled = grammarCheckEnabled
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
         textView.importsGraphics = false
@@ -33,6 +38,10 @@ struct EditorView: NSViewRepresentable {
         textView.textContainer?.lineFragmentPadding = 4
 
         textView.delegate = context.coordinator
+
+        if !spellingLanguage.isEmpty {
+            NSSpellChecker.shared.setLanguage(spellingLanguage)
+        }
 
         // Set up gutter
         let gutterView = GutterView()
@@ -87,6 +96,14 @@ struct EditorView: NSViewRepresentable {
         textView.selectedTextAttributes = [
             .backgroundColor: theme.selectionColor
         ]
+
+        // Sync spell checking settings
+        if textView.isContinuousSpellCheckingEnabled != spellCheckEnabled {
+            textView.isContinuousSpellCheckingEnabled = spellCheckEnabled
+        }
+        if textView.isGrammarCheckingEnabled != grammarCheckEnabled {
+            textView.isGrammarCheckingEnabled = grammarCheckEnabled
+        }
 
         // Update syntax highlighter theme and re-highlight if needed
         // NOTE: Don't set textView.textColor or textView.font here — those modify

@@ -22,6 +22,9 @@ struct GeneralPreferencesView: View {
     @AppStorage("editorThemeMode") private var editorThemeMode: ThemeMode = .system
     @AppStorage("previewThemeMode") private var previewThemeMode: ThemeMode = .system
     @AppStorage("splitOrientation") private var isVerticalSplit = false
+    @AppStorage("spellCheckEnabled") private var spellCheckEnabled = true
+    @AppStorage("grammarCheckEnabled") private var grammarCheckEnabled = false
+    @AppStorage("spellingLanguage") private var spellingLanguage: SpellingLanguage = .automatic
 
     var body: some View {
         Form {
@@ -57,6 +60,18 @@ struct GeneralPreferencesView: View {
                 Picker("Default Split", selection: $isVerticalSplit) {
                     Text("Horizontal (side by side)").tag(false)
                     Text("Vertical (top and bottom)").tag(true)
+                }
+            }
+
+            Section("Spelling & Grammar") {
+                Toggle("Check spelling while typing", isOn: $spellCheckEnabled)
+
+                Toggle("Check grammar", isOn: $grammarCheckEnabled)
+
+                Picker("Language", selection: $spellingLanguage) {
+                    ForEach(SpellingLanguage.allCases, id: \.self) { lang in
+                        Text(lang.label).tag(lang)
+                    }
                 }
             }
         }
@@ -97,5 +112,21 @@ struct SSGPreferencesView: View {
             }
         }
         .padding(20)
+    }
+}
+
+enum SpellingLanguage: String, CaseIterable {
+    case automatic = ""
+    case enUS = "en_US"
+    case enGB = "en_GB"
+    case enCA = "en_CA"
+
+    var label: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .enUS: return "US English"
+        case .enGB: return "British English"
+        case .enCA: return "Canadian English"
+        }
     }
 }

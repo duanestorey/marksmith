@@ -154,6 +154,59 @@ struct EditorView: NSViewRepresentable {
             isUpdating = false
         }
 
+        func textView(_ textView: NSTextView, shouldSetSpellingState value: Int, range: NSRange) -> Int {
+            guard let storage = textView.textStorage, range.location < storage.length else {
+                return value
+            }
+
+            let text = storage.string
+
+            // Skip front matter (YAML between --- delimiters at document start)
+            if isInFrontMatter(range: range, text: text) {
+                return 0
+            }
+
+            // Check foreground color at this range against theme colors to skip
+            let checkLocation = min(range.location, storage.length - 1)
+            let attrs = storage.attributes(at: checkLocation, effectiveRange: nil)
+            if let color = attrs[.foregroundColor] as? NSColor {
+                let theme = parent.theme
+                // Skip code (fenced blocks + inline) and link URLs
+                if color.isClose(to: theme.codeColor) || color.isClose(to: theme.linkURLColor) {
+                    return 0
+                }
+            }
+
+            // Skip text that looks like a URL (catches image URLs colored as linkColor)
+            let nsText = text as NSString
+            if range.location + range.length <= nsText.length {
+                let word = nsText.substring(with: range)
+                if word.contains("://") || word.hasPrefix("www.") {
+                    return 0
+                }
+            }
+
+            return value
+        }
+
+        private func isInFrontMatter(range: NSRange, text: String) -> Bool {
+            let nsText = text as NSString
+            // Front matter must start at the very beginning of the document
+            guard nsText.length >= 3, nsText.substring(with: NSRange(location: 0, length: 3)) == "---" else {
+                return false
+            }
+            // Find the closing ---
+            let searchStart = nsText.lineRange(for: NSRange(location: 0, length: 0)).length
+            let searchRange = NSRange(location: searchStart, length: nsText.length - searchStart)
+            let closingRange = nsText.range(of: "---", options: [], range: searchRange)
+            guard closingRange.location != NSNotFound else {
+                return false
+            }
+            let frontMatterEnd = NSMaxRange(closingRange)
+            // Check if the spelling range falls within front matter
+            return range.location < frontMatterEnd
+        }
+
         // MARK: - Layout notifications
 
         @objc func textViewDidChangeLayout(_ notification: Notification) {
@@ -439,4 +492,19 @@ struct EditorTheme {
         blockQuoteColor: NSColor(red: 0.55, green: 0.60, blue: 0.65, alpha: 1.0),
         listMarkerColor: NSColor(red: 0.45, green: 0.70, blue: 0.45, alpha: 1.0)
     )
+}
+
+// MARK: - NSColor Comparison
+
+extension NSColor {
+    func isClose(to other: NSColor, tolerance: CGFloat = 0.01) -> Bool {
+        guard let c1 = self.usingColorSpace(.deviceRGB),
+              let c2 = other.usingColorSpace(.deviceRGB) else {
+            return false
+        }
+        return abs(c1.redComponent - c2.redComponent) < tolerance
+            && abs(c1.greenComponent - c2.greenComponent) < tolerance
+            && abs(c1.blueComponent - c2.blueComponent) < tolerance
+            && abs(c1.alphaComponent - c2.alphaComponent) < tolerance
+    }
 }

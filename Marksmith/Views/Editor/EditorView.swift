@@ -242,15 +242,20 @@ struct EditorView: NSViewRepresentable {
             nc.addObserver(self, selector: #selector(handleFormatImage), name: .editorFormatImage, object: nil)
         }
 
-        @objc private func handleFormatBold() { wrapSelection(prefix: "**", suffix: "**") }
-        @objc private func handleFormatItalic() { wrapSelection(prefix: "_", suffix: "_") }
-        @objc private func handleFormatCode() { wrapSelection(prefix: "`", suffix: "`") }
-        @objc private func handleFormatH1() { prefixLine(with: "# ") }
-        @objc private func handleFormatH2() { prefixLine(with: "## ") }
-        @objc private func handleFormatH3() { prefixLine(with: "### ") }
+        private var isFirstResponder: Bool {
+            guard let textView = textView else { return false }
+            return textView.window?.firstResponder == textView
+        }
+
+        @objc private func handleFormatBold() { guard isFirstResponder else { return }; wrapSelection(prefix: "**", suffix: "**") }
+        @objc private func handleFormatItalic() { guard isFirstResponder else { return }; wrapSelection(prefix: "_", suffix: "_") }
+        @objc private func handleFormatCode() { guard isFirstResponder else { return }; wrapSelection(prefix: "`", suffix: "`") }
+        @objc private func handleFormatH1() { guard isFirstResponder else { return }; prefixLine(with: "# ") }
+        @objc private func handleFormatH2() { guard isFirstResponder else { return }; prefixLine(with: "## ") }
+        @objc private func handleFormatH3() { guard isFirstResponder else { return }; prefixLine(with: "### ") }
 
         @objc private func handleFormatLink() {
-            guard let textView = textView else { return }
+            guard isFirstResponder, let textView = textView else { return }
             let selected = selectedText()
             if selected.isEmpty {
                 textView.insertText("[link text](url)", replacementRange: textView.selectedRange())
@@ -260,7 +265,7 @@ struct EditorView: NSViewRepresentable {
         }
 
         @objc private func handleFormatImage() {
-            guard let textView = textView else { return }
+            guard isFirstResponder, let textView = textView else { return }
             let selected = selectedText()
             if selected.isEmpty {
                 textView.insertText("![alt text](image-url)", replacementRange: textView.selectedRange())

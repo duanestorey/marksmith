@@ -83,10 +83,10 @@ final class SSGService: ObservableObject {
 
             do {
                 try process.run()
-                process.waitUntilExit()
 
                 let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
                 let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
                 let outputString = Self.stripANSI(String(data: outputData, encoding: .utf8) ?? "")
                 let errorString = Self.stripANSI(String(data: errorData, encoding: .utf8) ?? "")
 

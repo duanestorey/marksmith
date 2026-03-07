@@ -425,7 +425,7 @@ struct CommitSheetView: View {
                         .frame(maxWidth: .infinity, minHeight: 60)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
+                        LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(fileStatuses) { file in
                                 HStack(spacing: 8) {
                                     Text(file.displayStatus)

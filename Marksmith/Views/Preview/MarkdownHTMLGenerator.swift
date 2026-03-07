@@ -7,9 +7,9 @@ struct MarkdownHTMLGenerator {
     /// Parse Markdown text and produce an HTML string.
     /// Strips YAML front matter (if present) and renders it as a styled table.
     func generateHTML(from markdown: String) -> String {
-        let (frontMatter, body) = extractFrontMatter(from: markdown)
+        let (frontMatter, body, lineOffset) = extractFrontMatter(from: markdown)
         let document = Document(parsing: body, options: [.parseBlockDirectives, .parseSymbolLinks])
-        var walker = HTMLRenderer()
+        var walker = HTMLRenderer(lineOffset: lineOffset)
         walker.visit(document)
 
         var html = ""
@@ -21,13 +21,13 @@ struct MarkdownHTMLGenerator {
     }
 
     /// Extract YAML front matter delimited by `---` at the start of the file.
-    private func extractFrontMatter(from text: String) -> (frontMatter: String?, body: String) {
+    private func extractFrontMatter(from text: String) -> (frontMatter: String?, body: String, bodyLineOffset: Int) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("---") else { return (nil, text) }
+        guard trimmed.hasPrefix("---") else { return (nil, text, 0) }
 
         // Find the closing ---
         let lines = text.components(separatedBy: "\n")
-        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return (nil, text) }
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return (nil, text, 0) }
 
         var closingIndex: Int?
         for i in 1..<lines.count {
@@ -37,11 +37,11 @@ struct MarkdownHTMLGenerator {
             }
         }
 
-        guard let endIndex = closingIndex, endIndex > 1 else { return (nil, text) }
+        guard let endIndex = closingIndex, endIndex > 1 else { return (nil, text, 0) }
 
         let fmLines = lines[1..<endIndex]
         let bodyLines = lines[(endIndex + 1)...]
-        return (fmLines.joined(separator: "\n"), bodyLines.joined(separator: "\n"))
+        return (fmLines.joined(separator: "\n"), bodyLines.joined(separator: "\n"), endIndex + 1)
     }
 
     /// Render front matter as a styled HTML table.
@@ -143,6 +143,11 @@ enum PreviewTheme: String, CaseIterable {
 private struct HTMLRenderer: MarkupWalker {
     var html = ""
     private var listNestingLevel = 0
+    private let lineOffset: Int
+
+    init(lineOffset: Int = 0) {
+        self.lineOffset = lineOffset
+    }
 
     // MARK: - Block elements
 
@@ -152,28 +157,28 @@ private struct HTMLRenderer: MarkupWalker {
 
     mutating func visitHeading(_ heading: Heading) -> () {
         let tag = "h\(heading.level)"
-        let line = heading.range?.lowerBound.line ?? 0
+        let line = (heading.range?.lowerBound.line ?? 0) + lineOffset
         html += "<\(tag) data-line=\"\(line)\">"
         descendInto(heading)
         html += "</\(tag)>\n"
     }
 
     mutating func visitParagraph(_ paragraph: Paragraph) -> () {
-        let line = paragraph.range?.lowerBound.line ?? 0
+        let line = (paragraph.range?.lowerBound.line ?? 0) + lineOffset
         html += "<p data-line=\"\(line)\">"
         descendInto(paragraph)
         html += "</p>\n"
     }
 
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) -> () {
-        let line = blockQuote.range?.lowerBound.line ?? 0
+        let line = (blockQuote.range?.lowerBound.line ?? 0) + lineOffset
         html += "<blockquote data-line=\"\(line)\">"
         descendInto(blockQuote)
         html += "</blockquote>\n"
     }
 
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) -> () {
-        let line = codeBlock.range?.lowerBound.line ?? 0
+        let line = (codeBlock.range?.lowerBound.line ?? 0) + lineOffset
         let lang = codeBlock.language ?? ""
         let langClass = lang.isEmpty ? "" : " class=\"language-\(escapeHTML(lang))\""
         html += "<pre data-line=\"\(line)\"><code\(langClass)>"
@@ -182,7 +187,7 @@ private struct HTMLRenderer: MarkupWalker {
     }
 
     mutating func visitOrderedList(_ orderedList: OrderedList) -> () {
-        let line = orderedList.range?.lowerBound.line ?? 0
+        let line = (orderedList.range?.lowerBound.line ?? 0) + lineOffset
         let start = orderedList.startIndex
         html += start != 1 ? "<ol start=\"\(start)\" data-line=\"\(line)\">" : "<ol data-line=\"\(line)\">"
         listNestingLevel += 1
@@ -192,7 +197,7 @@ private struct HTMLRenderer: MarkupWalker {
     }
 
     mutating func visitUnorderedList(_ unorderedList: UnorderedList) -> () {
-        let line = unorderedList.range?.lowerBound.line ?? 0
+        let line = (unorderedList.range?.lowerBound.line ?? 0) + lineOffset
         html += "<ul data-line=\"\(line)\">"
         listNestingLevel += 1
         descendInto(unorderedList)
@@ -220,7 +225,7 @@ private struct HTMLRenderer: MarkupWalker {
     }
 
     mutating func visitTable(_ table: Table) -> () {
-        let line = table.range?.lowerBound.line ?? 0
+        let line = (table.range?.lowerBound.line ?? 0) + lineOffset
         html += "<table data-line=\"\(line)\">\n"
         descendInto(table)
         html += "</table>\n"

@@ -24,6 +24,13 @@ struct ContentView: View {
     @State private var buildOutputText = ""
     @State private var buildOutputTitle = "Build Output"
 
+    // Scroll sync state
+    @State private var editorVisibleLine: Int = 0
+    @State private var previewVisibleLine: Int = 0
+    @State private var lastEditorScrollTime: Date = .distantPast
+    @State private var lastPreviewScrollTime: Date = .distantPast
+    private let scrollLockDuration: TimeInterval = 0.5
+
     @Environment(\.undoManager) var undoManager
     @Environment(\.colorScheme) var systemColorScheme
 
@@ -157,7 +164,13 @@ struct ContentView: View {
             gitStatuses: gitStatus.lineStatuses,
             spellCheckEnabled: spellCheckEnabled,
             grammarCheckEnabled: grammarCheckEnabled,
-            spellingLanguage: spellingLanguage.rawValue
+            spellingLanguage: spellingLanguage.rawValue,
+            scrollToLine: previewVisibleLine,
+            onScrollLineChange: { line in
+                guard Date().timeIntervalSince(lastPreviewScrollTime) > scrollLockDuration else { return }
+                editorVisibleLine = line
+                lastEditorScrollTime = Date()
+            }
         )
         .frame(minWidth: 200, minHeight: 100)
     }
@@ -230,7 +243,13 @@ struct ContentView: View {
         PreviewView(
             html: previewHTML,
             theme: previewTheme,
-            baseURL: nil
+            baseURL: nil,
+            scrollToLine: editorVisibleLine,
+            onScrollLineChange: { line in
+                guard Date().timeIntervalSince(lastEditorScrollTime) > scrollLockDuration else { return }
+                previewVisibleLine = line
+                lastPreviewScrollTime = Date()
+            }
         )
         .frame(minWidth: 200, minHeight: 150)
     }

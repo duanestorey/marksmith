@@ -8,6 +8,8 @@ struct EditorView: NSViewRepresentable {
     var spellCheckEnabled: Bool
     var grammarCheckEnabled: Bool
     var spellingLanguage: String
+    var scrollToLine: Int = 0
+    var onScrollLineChange: ((Int) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -133,6 +135,12 @@ struct EditorView: NSViewRepresentable {
         context.coordinator.rulerView?.gutterView?.textColor = theme.textColor.withAlphaComponent(0.5)
         context.coordinator.rulerView?.gutterView?.gitStatuses = gitStatuses
         context.coordinator.rulerView?.needsDisplay = true
+
+        // Scroll sync: scroll to target line if changed
+        if scrollToLine > 0, scrollToLine != context.coordinator.lastScrolledToLine {
+            context.coordinator.lastScrolledToLine = scrollToLine
+            context.coordinator.performScrollToLine(scrollToLine)
+        }
     }
 
     // MARK: - Coordinator
@@ -145,7 +153,10 @@ struct EditorView: NSViewRepresentable {
         var syntaxHighlighter: SyntaxHighlighter?
         var lastThemeFontSize: CGFloat = 0
         var lastThemeIsDark: Bool?
+        var lastScrolledToLine: Int = 0
         private var isUpdating = false
+        private var isProgrammaticScroll = false
+        private var scrollReportTimer: Timer?
 
         init(_ parent: EditorView) {
             self.parent = parent
@@ -225,7 +236,88 @@ struct EditorView: NSViewRepresentable {
             guard !isUpdating else { return }
             isUpdating = true
             updateLineRects()
+            scheduleVisibleLineReport()
             isUpdating = false
+        }
+
+        // MARK: - Scroll sync
+
+        private func scheduleVisibleLineReport() {
+            guard !isProgrammaticScroll else { return }
+            scrollReportTimer?.invalidate()
+            scrollReportTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { [weak self] _ in
+                self?.reportFirstVisibleLine()
+            }
+        }
+
+        private func reportFirstVisibleLine() {
+            guard let textView = textView,
+                  let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer,
+                  let scrollView = scrollView else { return }
+
+            let text = textView.string as NSString
+            guard text.length > 0 else { return }
+
+            let visibleRect = scrollView.contentView.bounds
+            let textContainerInset = textView.textContainerInset
+            let containerRect = NSRect(
+                x: 0,
+                y: visibleRect.origin.y - textContainerInset.height,
+                width: textContainer.size.width,
+                height: visibleRect.height
+            )
+            let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: containerRect, in: textContainer)
+            guard visibleGlyphRange.length > 0 else { return }
+
+            let firstVisibleChar = layoutManager.characterRange(
+                forGlyphRange: NSRange(location: visibleGlyphRange.location, length: 1),
+                actualGlyphRange: nil
+            ).location
+
+            var lineNumber = 1
+            for i in 0..<min(firstVisibleChar, text.length) {
+                if text.character(at: i) == 0x0A {
+                    lineNumber += 1
+                }
+            }
+
+            parent.onScrollLineChange?(lineNumber)
+        }
+
+        func performScrollToLine(_ line: Int) {
+            guard let textView = textView,
+                  let layoutManager = textView.layoutManager,
+                  let scrollView = scrollView else { return }
+
+            let text = textView.string as NSString
+            guard text.length > 0 else { return }
+
+            // Find character index for the start of the target line
+            var currentLine = 1
+            var charIndex = 0
+            while currentLine < line && charIndex < text.length {
+                if text.character(at: charIndex) == 0x0A {
+                    currentLine += 1
+                }
+                charIndex += 1
+            }
+            guard charIndex < text.length else { return }
+
+            // Get line fragment rect for this character
+            let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
+            var lineRange = NSRange()
+            let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: &lineRange)
+
+            // Scroll so this line is at the top
+            isProgrammaticScroll = true
+            let scrollY = lineRect.origin.y + textView.textContainerInset.height
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: scrollY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.isProgrammaticScroll = false
+            }
         }
 
         // MARK: - Formatting commands
